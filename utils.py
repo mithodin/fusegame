@@ -9,10 +9,12 @@ class File:
         self.name = name
         self.data = bytes()
         now = time()
+        uid, gid, _ = fuse.fuse_get_context()
         self.attrs = dict(st_mode=(S_IFREG | mode), st_ctime=now, st_size=0,
-                               st_mtime=now, st_atime=now, st_nlink=1)
+                               st_mtime=now, st_atime=now, st_nlink=1,
+                               st_uid = uid, st_gid = gid)
 
-    def add_trigger(event,action,once=True):
+    def add_trigger(self,event,action,once=True):
         self.triggers.append(Trigger(event,action,once))
 
     def get_file(self,path):
@@ -27,21 +29,28 @@ class File:
         if len(path) == 0:
             return self
 
-    def trigger(event):
+    def trigger(self,event):
         for t in self.triggers:
             if t.event == event:
                 t.execute()
 
+    def read(self,size=None,offset=0):
+        if size == None:
+            size = self.attrs['st_size']
+        return self.data[offset:offset+size]
+
 class SLink:
     def __init__(self,name,target):
-        self.target = target
         self.name = name
-        self.attrs = dict(st_mode=(S_IFLNK | 0o777), st_size=target.attrs['st_size'], st_nlink=1)
+        self.target = target
+        self.attrs = dict(st_mode=(S_IFLNK | 0o777), st_nlink=1, st_size=len(target))
 
-    def __getattr__(self, name):
-        def method(*args):
-            self.target.__getattr__(name)(args)
-        return method
+    def getfile(self,path):
+        if len(path) == 0:
+            return self
+
+    def read(self):
+        return self.target
 
 class Folder(File):
     def __init__(self,name,mode):
@@ -66,6 +75,9 @@ class Folder(File):
 
     def remove_child(self,ch):
         self.children.pop(ch.name)
+
+    def read(self,size=0,offset=0):
+        return ['.','..']+[f.name for f in self.children.values()]
 
 class Trigger:
     def __init__(self,event,action,once=True):

@@ -2,11 +2,12 @@
 import fuse
 import utils
 import logging
+import os
 
 from sys import argv, exit
 from time import time
 
-class Memory(fuse.LoggingMixIn, fuse.Operations):
+class Fusegame(fuse.LoggingMixIn, fuse.Operations):
     'Example memory filesystem. Supports only one level of files.'
 
     def __init__(self):
@@ -53,10 +54,10 @@ class Memory(fuse.LoggingMixIn, fuse.Operations):
         return attrs.keys()
 
     def mkdir(self, path, mode):
-        p = path.split("/")
-        name = p[-1]
+        name = path.split("/")[-1]
         parent = self.root.get_parent(path)
         nf = utils.Folder(name,mode)
+        parent.add_child(nf)
         parent.attrs['st_nlink'] += 1
 
     def open(self, path, flags):
@@ -64,16 +65,16 @@ class Memory(fuse.LoggingMixIn, fuse.Operations):
         return self.fd
 
     def read(self, path, size, offset, fh):
-        fh = self.root.get_file(path)
-        return fh.data[offset:offset + size]
+        f = self.root.get_file(path)
+        return f.read(size,offset)
 
     def readdir(self, path, fh):
-        fh = self.root.get_file(path)
-        return ['.', '..'] + [f.name for f in fh.children.values()]
+        f = self.root.get_file(path)
+        return f.read()
 
     def readlink(self, path):
         fh = self.root.get_file(path)
-        return fh.data
+        return fh.read()
 
     def removexattr(self, path, name):
         fh = self.root.get_file(path)
@@ -107,10 +108,10 @@ class Memory(fuse.LoggingMixIn, fuse.Operations):
         return dict(f_bsize=512, f_blocks=4096, f_bavail=2048)
 
     def symlink(self, target, source):
-        fh = self.root.get_file(source)
-        parent = self.root.get_parent(target)
         name = target.split("/")[-1]
-        parent.add_child(utils.SLink(name,fh))
+        lnk = utils.SLink(name,source)
+        parent = self.root.get_parent(target)
+        parent.add_child(lnk)
 
     def truncate(self, path, length, fh=None):
         f = self.root.get_file(path)
@@ -142,4 +143,4 @@ if __name__ == '__main__':
         exit(1)
 
     logging.basicConfig(level=logging.DEBUG)
-    fuse_obj = fuse.FUSE(Memory(), argv[1], foreground=True)
+    fuse_obj = fuse.FUSE(Fusegame(), argv[1], foreground=True)
