@@ -33,6 +33,7 @@ class Fusegame(fuse.LoggingMixIn, fuse.Operations):
         f = utils.File(name,mode)
         parent.add_child(f)
         self.fd += 1
+        parent.trigger(utils.Event.NEW_CHILD)
         return self.fd
 
     def getattr(self, path, fh=None):
@@ -136,6 +137,15 @@ class Fusegame(fuse.LoggingMixIn, fuse.Operations):
         f.attrs['st_size'] = len(f.data)
         return len(data)
 
+    def add_trigger(self, path, event, action, once=True):
+        f = self.root.get_file(path)
+        f.add_trigger(event, action, once)
+
+    def __getattrs__(self,name):
+        print("Hi, {}.".format(name))
+        def method(*args):
+            print("Someone tried to call {}, which does not exists.".format(name))
+        return method
 
 if __name__ == '__main__':
     if len(argv) != 2:
@@ -143,4 +153,10 @@ if __name__ == '__main__':
         exit(1)
 
     logging.basicConfig(level=logging.DEBUG)
-    fuse_obj = fuse.FUSE(Fusegame(), argv[1], foreground=True)
+    game = Fusegame()
+    game.mkdir("/secret",0o755)
+    fa = utils.Trigger.file_available("/secret/answer.txt",game)
+    action = utils.Trigger.create_file("/hallo.txt","Hallo Welt\n",game)
+    cond = utils.Trigger.condition(fa,action)
+    game.add_trigger("/secret",utils.Event.NEW_CHILD,cond)
+    fuse_obj = fuse.FUSE(game, argv[1], foreground=True)

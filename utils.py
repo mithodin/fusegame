@@ -2,6 +2,7 @@ import fuse
 from errno import ENOENT
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from time import time
+from enum import Enum
 
 class File:
     def __init__(self,name,mode):
@@ -88,3 +89,30 @@ class Trigger:
     def execute(self):
         if self.action() and self.once:
             self.action = lambda: None
+
+    def condition(cond,action):
+        def ifthen():
+            if cond():
+                action()
+                return True
+            else:
+                return False
+        return ifthen
+
+    def create_file(path, contents, game):
+        def f_create():
+            game.create(path,0o600)
+            game.write(path,contents.encode(),0,None)
+        return f_create
+
+    def file_available(path, game):
+        def fa():
+            try:
+                game.getattr(path)
+            except fuse.FuseOSError:
+                return False
+            return True
+        return fa
+
+class Event(Enum):
+    NEW_CHILD = 1
