@@ -203,12 +203,14 @@ class Fusegame(fuse.LoggingMixIn, fuse.Operations):
         f = self.root.get_file(path)
         f.add_trigger(event, action, once)
 
-    def hl_create_file(self, path, contents, mode, hidden=False):
+    def hl_create_file(self, path, contents, mode, hidden=False, uid=None, gid=None):
         self.create(path,mode)
         f = self.root.get_file(path)
         if hidden:
             f.hide()
         self.write(path,contents.encode(),0,None)
+        if uid != None:
+            f.set_owner(uid,gid if gid != None else uid)
         return f
 
     def hl_mkdir(self, path, mode, hidden=False):
