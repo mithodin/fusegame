@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import fuse
-import utils
 import logging
 import os
+
+import utils
+import gamescript as gs
 
 from sys import argv, exit
 from time import time
@@ -135,17 +137,33 @@ class Fusegame(fuse.LoggingMixIn, fuse.Operations):
         f = self.root.get_file(path)
         f.data = f.data[:offset] + data
         f.attrs['st_size'] = len(f.data)
+        f.trigger(utils.Event.FILE_UPDATE)
         return len(data)
-
-    def add_trigger(self, path, event, action, once=True):
-        f = self.root.get_file(path)
-        f.add_trigger(event, action, once)
 
     def __getattrs__(self,name):
         print("Hi, {}.".format(name))
         def method(*args):
             print("Someone tried to call {}, which does not exists.".format(name))
         return method
+
+    def hl_add_trigger(self, path, event, action, once=True):
+        f = self.root.get_file(path)
+        f.add_trigger(event, action, once)
+
+    def hl_create_file(self, path, contents, mode, hidden=False):
+        self.create(path,mode)
+        f = self.root.get_file(path)
+        if hidden:
+            f.hide()
+        self.write(path,contents.encode(),0,None)
+        return f
+
+    def hl_mkdir(self, path, mode, hidden=False):
+        self.mkdir(path,mode)
+        f = self.root.get_file(path)
+        if hidden:
+            f.hide()
+        return f
 
 if __name__ == '__main__':
     if len(argv) != 2:
@@ -154,9 +172,5 @@ if __name__ == '__main__':
 
     logging.basicConfig(level=logging.DEBUG)
     game = Fusegame()
-    game.mkdir("/secret",0o755)
-    fa = utils.Trigger.file_available("/secret/answer.txt",game)
-    action = utils.Trigger.create_file("/hallo.txt","Hallo Welt\n",game)
-    cond = utils.Trigger.condition(fa,action)
-    game.add_trigger("/secret",utils.Event.NEW_CHILD,cond)
+    gs.setup(game)
     fuse_obj = fuse.FUSE(game, argv[1], foreground=True)

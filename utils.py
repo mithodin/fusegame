@@ -4,19 +4,22 @@ from stat import S_IFDIR, S_IFLNK, S_IFREG
 from time import time
 from enum import Enum
 
-class File:
-    def __init__(self,name,mode):
-        self.triggers = []
+class Node:
+    def __init__(self,name,mode,hidden=False):
+        self.triggers = {}
         self.name = name
-        self.data = bytes()
-        now = time()
+        self.hidden = hidden
         uid, gid, _ = fuse.fuse_get_context()
-        self.attrs = dict(st_mode=(S_IFREG | mode), st_ctime=now, st_size=0,
-                               st_mtime=now, st_atime=now, st_nlink=1,
-                               st_uid = uid, st_gid = gid)
+        self.attrs = dict(st_mode=mode, st_uid = uid, st_gid = gid, st_nlink = 1)
 
     def add_trigger(self,event,action,once=True):
-        self.triggers.append(Trigger(event,action,once))
+        self.triggers[event] = Trigger(event,action,once)
+
+    def trigger(self,event):
+        try:
+            self.triggers[event].execute()
+        except:
+            pass
 
     def get_file(self,path):
         return self.getfile(path.split("/")[1:])
@@ -30,34 +33,66 @@ class File:
         if len(path) == 0:
             return self
 
-    def trigger(self,event):
-        for t in self.triggers:
-            if t.event == event:
-                t.execute()
+    def show(self):
+        self.hidden = False
+
+    def hide(self):
+        self.hidden = True
+
+    def get_show(self):
+        def show():
+            self.hidden = False
+        return show
+
+    def get_hide(self):
+        def hide():
+            self.hidden = True
+        return hide
+
+    def get_node_available(path, game):
+        def na():
+            try:
+                game.getattr(path)
+            except fuse.FuseOSError:
+                return False
+            return True
+        return na
+
+
+class File(Node):
+    def __init__(self,name,mode,hidden=False):
+        Node.__init__(self,name,S_IFREG | mode,hidden)
+        self.data = bytes()
+        now = time()
+        self.attrs['st_ctime'] = now
+        self.attrs['st_size'] = 0
+        self.attrs['st_mtime'] = now
+        self.attrs['st_atime'] = now
 
     def read(self,size=None,offset=0):
         if size == None:
             size = self.attrs['st_size']
         return self.data[offset:offset+size]
 
-class SLink:
-    def __init__(self,name,target):
-        self.name = name
-        self.target = target
-        self.attrs = dict(st_mode=(S_IFLNK | 0o777), st_nlink=1, st_size=len(target))
+    def get_create_file(path, contents, game):
+        def f_create():
+            game.hl_create_file(path, contents, 0o600)
+        return f_create
 
-    def getfile(self,path):
-        if len(path) == 0:
-            return self
+
+class SLink(Node):
+    def __init__(self,name,target,hidden=False):
+        Node.__init__(self,name,S_FILNK | 0o777,hidden)
+        self.target = target
+        self.attrs['st_size'] = len(target)
 
     def read(self):
         return self.target
 
-class Folder(File):
-    def __init__(self,name,mode):
-        File.__init__(self,name,mode)
+class Folder(Node):
+    def __init__(self,name,mode,hidden=False):
+        Node.__init__(self,name,S_IFDIR | mode,hidden)
         self.children = {}
-        self.attrs['st_mode'] = S_IFDIR | mode
         self.attrs['st_nlink'] = 2
 
     def getfile(self,path):
@@ -78,7 +113,7 @@ class Folder(File):
         self.children.pop(ch.name)
 
     def read(self,size=0,offset=0):
-        return ['.','..']+[f.name for f in self.children.values()]
+        return ['.','..']+[f.name for f in self.children.values() if not f.hidden]
 
 class Trigger:
     def __init__(self,event,action,once=True):
@@ -99,20 +134,6 @@ class Trigger:
                 return False
         return ifthen
 
-    def create_file(path, contents, game):
-        def f_create():
-            game.create(path,0o600)
-            game.write(path,contents.encode(),0,None)
-        return f_create
-
-    def file_available(path, game):
-        def fa():
-            try:
-                game.getattr(path)
-            except fuse.FuseOSError:
-                return False
-            return True
-        return fa
-
 class Event(Enum):
     NEW_CHILD = 1
+    FILE_UPDATE = 2
