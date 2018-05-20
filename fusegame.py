@@ -16,12 +16,26 @@ class Fusegame(fuse.LoggingMixIn, fuse.Operations):
         self.root = utils.Folder("/",0o755)
         self.fd = 0
 
+    def access(self, path, mode):
+        uid, gid, _ = fuse.fuse_get_context()
+        f = self.root.get_file(path)
+        perm = f.attrs['st_mode']
+        if mode & perm == mode:
+            return 0
+        elif gid == f.attrs['st_gid'] and mode <<3 & perm == mode <<3:
+            return 0
+        elif uid == f.attrs['st_uid'] and mode <<6 & perm == mode <<6:
+            return 0
+        return -1
+
     def chmod(self, path, mode):
-        print(path)
-        fh = self.root.get_file(path)
-        fh.attrs['st_mode'] &= 0o770000
-        fh.attrs['st_mode'] |= mode
-        return 0
+        if self.access(path, os.W_OK) == 0:
+            fh = self.root.get_file(path)
+            fh.attrs['st_mode'] &= 0o770000
+            fh.attrs['st_mode'] |= mode
+            return 0
+        else:
+            return -1
 
     def chown(self, path, uid, gid):
         fh = self.root.get_file(path)
