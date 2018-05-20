@@ -1,4 +1,7 @@
-import fuse
+try:
+    import fusepy as fuse
+except ImportError:
+    import fuse
 import os
 
 from errno import ENOENT

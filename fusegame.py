@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+#fusepy in debian testing, fuse in pip (why though?)
 try:
     import fusepy as fuse
 except ImportError:
