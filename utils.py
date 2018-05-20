@@ -1,4 +1,6 @@
 import fuse
+import os
+
 from errno import ENOENT
 from stat import S_IFDIR, S_IFLNK, S_IFREG
 from time import time
@@ -10,6 +12,9 @@ class Node:
         self.name = name
         self.hidden = hidden
         uid, gid, _ = fuse.fuse_get_context()
+        if uid == 0:
+            uid = os.getuid()
+            gid = os.getgid()
         self.attrs = dict(st_mode=mode, st_uid = uid, st_gid = gid, st_nlink = 1)
 
     def add_trigger(self,event,action,once=True):
@@ -39,25 +44,29 @@ class Node:
     def hide(self):
         self.hidden = True
 
-    def get_show(self):
-        def show():
-            self.hidden = False
-        return show
+    def node_available(path, game):
+        try:
+            game.getattr(path)
+        except fuse.FuseOSError:
+            return False
+        return True
 
-    def get_hide(self):
-        def hide():
-            self.hidden = True
-        return hide
+    def set_owner(self, uid, gid):
+        self.attrs['st_uid'] = uid
+        self.attrs['st_gid'] = gid
 
-    def get_node_available(path, game):
-        def na():
-            try:
-                game.getattr(path)
-            except fuse.FuseOSError:
-                return False
-            return True
-        return na
-
+    def access(self, mode):
+        uid, gid, _ = fuse.fuse_get_context()
+        if uid == 0:
+            return 0
+        perm = self.attrs['st_mode']
+        if mode & perm == mode:
+            return 0
+        elif gid == self.attrs['st_gid'] and mode <<3 & perm == mode <<3:
+            return 0
+        elif uid == self.attrs['st_uid'] and mode <<6 & perm == mode <<6:
+            return 0
+        return -1
 
 class File(Node):
     def __init__(self,name,mode,hidden=False):
@@ -73,12 +82,6 @@ class File(Node):
         if size == None:
             size = self.attrs['st_size']
         return self.data[offset:offset+size]
-
-    def get_create_file(path, contents, game):
-        def f_create():
-            game.hl_create_file(path, contents, 0o600)
-        return f_create
-
 
 class SLink(Node):
     def __init__(self,name,target,hidden=False):
@@ -133,6 +136,9 @@ class Trigger:
             else:
                 return False
         return ifthen
+
+    def ready_function(func, *args):
+        return lambda: func(*args)
 
 class Event(Enum):
     NEW_CHILD = 1

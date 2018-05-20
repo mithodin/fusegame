@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-import fuse
+try:
+    import fusepy as fuse
+except ImportError:
+    import fuse
 import logging
 import os
 
@@ -8,6 +11,7 @@ import gamescript as gs
 
 from sys import argv, exit
 from time import time
+from errno import EACCES, ENODATA
 
 class Fusegame(fuse.LoggingMixIn, fuse.Operations):
     'Example memory filesystem. Supports only one level of files.'
@@ -17,20 +21,13 @@ class Fusegame(fuse.LoggingMixIn, fuse.Operations):
         self.fd = 0
 
     def access(self, path, mode):
-        uid, gid, _ = fuse.fuse_get_context()
         f = self.root.get_file(path)
-        perm = f.attrs['st_mode']
-        if mode & perm == mode:
-            return 0
-        elif gid == f.attrs['st_gid'] and mode <<3 & perm == mode <<3:
-            return 0
-        elif uid == f.attrs['st_uid'] and mode <<6 & perm == mode <<6:
-            return 0
-        return -1
+        return f.access(mode)
 
     def chmod(self, path, mode):
-        if self.access(path, os.W_OK) == 0:
-            fh = self.root.get_file(path)
+        uid,_,_ = fuse.fuse_get_context()
+        fh = self.root.get_file(path)
+        if uid == 0 or uid == fh.attrs['st_uid']:
             fh.attrs['st_mode'] &= 0o770000
             fh.attrs['st_mode'] |= mode
             return 0
@@ -39,31 +36,36 @@ class Fusegame(fuse.LoggingMixIn, fuse.Operations):
 
     def chown(self, path, uid, gid):
         fh = self.root.get_file(path)
-        fh.attrs['st_uid'] = uid
-        fh.attrs['st_gid'] = gid
+        if uid == 0 or uid == fh.attrs['st_uid']:
+            fh.set_owner(uid, gid)
+            return 0
+        else:
+            return -1
 
     def create(self, path, mode):
         p = path.split("/")
         name = p[-1]
         parent = self.root.get_parent(path)
-        f = utils.File(name,mode)
-        parent.add_child(f)
-        self.fd += 1
-        parent.trigger(utils.Event.NEW_CHILD)
+        if parent.access(os.W_OK) == 0:
+            f = utils.File(name,mode)
+            parent.add_child(f)
+            self.fd += 1
+            parent.trigger(utils.Event.NEW_CHILD)
+        else:
+            raise fuse.FuseOSError(EACCES)
         return self.fd
 
     def getattr(self, path, fh=None):
         fh = self.root.get_file(path)
-        return fh.attrs
+        return fh.attrs.copy()
 
     def getxattr(self, path, name, position=0):
         fh = self.root.get_file(path)
         attrs = fh.attrs.get('attrs', {})
-
         try:
             return attrs[name]
         except KeyError:
-            return ''       # Should return ENOATTR
+            raise fuse.FuseOSError(ENODATA)
 
     def listxattr(self, path):
         fh = self.root.get_file(path)
@@ -73,40 +75,61 @@ class Fusegame(fuse.LoggingMixIn, fuse.Operations):
     def mkdir(self, path, mode):
         name = path.split("/")[-1]
         parent = self.root.get_parent(path)
-        nf = utils.Folder(name,mode)
-        parent.add_child(nf)
-        parent.attrs['st_nlink'] += 1
+        if parent.access(os.W_OK) == 0:
+            nf = utils.Folder(name,mode)
+            parent.add_child(nf)
+            parent.attrs['st_nlink'] += 1
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def open(self, path, flags):
+        #permissions?
         self.fd += 1
         return self.fd
 
     def read(self, path, size, offset, fh):
         f = self.root.get_file(path)
-        return f.read(size,offset)
+        if f.access(os.R_OK) == 0:
+            return f.read(size,offset)
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def readdir(self, path, fh):
         f = self.root.get_file(path)
-        return f.read()
+        if f.access(os.R_OK) == 0:
+            return f.read()
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def readlink(self, path):
         fh = self.root.get_file(path)
-        return fh.read()
+        if f.access(os.R_OK) == 0:
+            return fh.read()
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def removexattr(self, path, name):
         fh = self.root.get_file(path)
-        attrs = fh.attrs.get('attrs', {})
-
-        try:
-            del attrs[name]
-        except KeyError:
-            pass        # Should return ENOATTR
+        if fh.access(os.W_OK) == 0:
+            attrs = fh.attrs.get('attrs', {})
+            try:
+                del attrs[name]
+            except KeyError:
+                raise fuse.FuseOSError(ENODATA)
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def rename(self, old, new):
         fh = self.root.get_file(old)
+        if fh.access(os.W_OK) != 0:
+            raise fuse.FuseOSError(EACCES)
         parent_old = self.root.get_parent(old)
+        if parent_old.access(os.W_OK) != 0:
+            raise fuse.FuseOSError(EACCES)
         parent_old.remove_child(fh)
         parent_new = self.root.get_parent(new)
+        if parent_new.access(os.W_OK) != 0:
+            raise fuse.FuseOSError(EACCES)
         fh.name = new.split("/")[-1]
         parent_new.add_child(fh)
 
