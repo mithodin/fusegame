@@ -137,13 +137,19 @@ class Fusegame(fuse.LoggingMixIn, fuse.Operations):
     def rmdir(self, path):
         fh = self.root.get_file(path)
         parent = self.root.get_parent(path)
-        parent.remove_child(fh)
-        parent.attrs['st_nlink'] -= 1
+        if fh.access(os.W_OK) == 0 and parent.access(os.W_OK) == 0:
+            parent.remove_child(fh)
+            parent.attrs['st_nlink'] -= 1
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def setxattr(self, path, name, value, options, position=0):
         fh = self.root.get_file(path)
-        attrs = fh.attrs.get('attrs', {})
-        attrs[name] = value
+        if fh.access(os.W_OK) == 0:
+            attrs = fh.attrs.get('attrs', {})
+            attrs[name] = value
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def statfs(self, path):
         return dict(f_bsize=512, f_blocks=4096, f_bavail=2048)
@@ -152,37 +158,46 @@ class Fusegame(fuse.LoggingMixIn, fuse.Operations):
         name = target.split("/")[-1]
         lnk = utils.SLink(name,source)
         parent = self.root.get_parent(target)
-        parent.add_child(lnk)
+        if parent.access(os.W_OK) == 0:
+            parent.add_child(lnk)
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def truncate(self, path, length, fh=None):
         f = self.root.get_file(path)
-        f.data = f.data[:length]
-        f.attrs['st_size'] = length
+        if f.access(os.W_OK) == 0:
+            f.data = f.data[:length]
+            f.attrs['st_size'] = length
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def unlink(self, path):
         parent = self.root.get_parent(path)
         fh = self.root.get_file(path)
-        parent.remove_child(fh)
+        if fh.access(os.W_OK) == 0 and parent.access(os.W_OK) == 0:
+            parent.remove_child(fh)
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def utimens(self, path, times=None):
         now = time()
         atime, mtime = times if times else (now, now)
         fh = self.root.get_file(path)
-        fh.attrs['st_atime'] = atime
-        fh.attrs['st_mtime'] = mtime
+        if fh.access(os.W_OK) == 0:
+            fh.attrs['st_atime'] = atime
+            fh.attrs['st_mtime'] = mtime
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def write(self, path, data, offset, fh):
         f = self.root.get_file(path)
-        f.data = f.data[:offset] + data
-        f.attrs['st_size'] = len(f.data)
-        f.trigger(utils.Event.FILE_UPDATE)
-        return len(data)
-
-    def __getattrs__(self,name):
-        print("Hi, {}.".format(name))
-        def method(*args):
-            print("Someone tried to call {}, which does not exists.".format(name))
-        return method
+        if f.access(os.W_OK) == 0:
+            f.data = f.data[:offset] + data
+            f.attrs['st_size'] = len(f.data)
+            f.trigger(utils.Event.FILE_UPDATE)
+            return len(data)
+        else:
+            raise fuse.FuseOSError(EACCES)
 
     def hl_add_trigger(self, path, event, action, once=True):
         f = self.root.get_file(path)
